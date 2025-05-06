@@ -1,0 +1,1 @@
+# FastAPICRUD following BugBytes
