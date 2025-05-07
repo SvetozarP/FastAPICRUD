@@ -1,8 +1,11 @@
 import json
 import pathlib
+from datetime import datetime
 from typing import List, Union
 from fastapi import FastAPI, Response
+from sqlmodel import Session, select
 from starlette import status
+from database import TrackModel, engine
 
 from models import Track
 
@@ -13,14 +16,29 @@ data = []
 @app.on_event("startup")
 async def startup_event():
     datapath = pathlib.Path() / "data" / "tracks.json"
-    with open(datapath, 'r') as f:
-        tracks = json.load(f)
-        for track in tracks:
-            data.append(Track(**track).dict())
+    session = Session(engine)
+    # see if DB is populated
+    stmt = select(TrackModel)
+    result = session.exec(stmt).first()
+
+    # if no results
+    if result is None:
+        with open(datapath, "r") as f:
+            tracks = json.load(f)
+            for track in tracks:
+                if isinstance(track.get("last_play"), str):
+                    track["last_play"] = datetime.fromisoformat(track["last_play"])
+                session.add(TrackModel(**track))
+        session.commit()
+    session.close()
 
 @app.get("/tracks/", response_model=List[Track])
 async def tracks():
-    return data
+    # select * from table
+    with Session(engine) as session:
+        stmt = select(TrackModel)
+        result = session.exec(stmt).all()
+        return result
 
 
 @app.get("/tracks/{track_id}", response_model=Union[Track, str])
