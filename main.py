@@ -44,16 +44,13 @@ async def tracks():
 @app.get("/tracks/{track_id}", response_model=Union[Track, str])
 async def track(track_id: int, response: Response):
     # find track with given ID or none if none exists
-    track = None
-    for t in data:
-        if t['id'] == track_id:
-            track = t
-            break
+    with Session(engine) as session:
+        trck = session.get(TrackModel, track_id)
 
-    if track is None:
-        response.status_code = 404
-        return "Track not found"
-    return track
+        if trck is None:
+            response.status_code = 404
+            return "Track not found"
+        return trck
 
 
 @app.post("/tracks/", response_model=Track, status_code=status.HTTP_201_CREATED)
