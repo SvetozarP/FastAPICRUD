@@ -2,7 +2,7 @@ import json
 import pathlib
 from datetime import datetime
 from typing import List, Union
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Depends
 from sqlmodel import Session, select
 from starlette import status
 from database import TrackModel, engine
@@ -32,67 +32,69 @@ async def startup_event():
         session.commit()
     session.close()
 
-@app.get("/tracks/", response_model=List[Track])
-async def tracks():
-    # select * from table
+
+def get_session():
     with Session(engine) as session:
-        stmt = select(TrackModel)
-        result = session.exec(stmt).all()
-        return result
+        yield session
+
+@app.get("/tracks/", response_model=List[Track])
+async def tracks(session: Session = Depends(get_session)):
+    # select * from table
+    stmt = select(TrackModel)
+    result = session.exec(stmt).all()
+    return result
 
 
 @app.get("/tracks/{track_id}", response_model=Union[Track, str])
-async def track(track_id: int, response: Response):
+async def track(track_id: int, response: Response, session: Session = Depends(get_session)):
     # find track with given ID or none if none exists
-    with Session(engine) as session:
-        trck = session.get(TrackModel, track_id)
+    trck = session.get(TrackModel, track_id)
 
-        if trck is None:
-            response.status_code = 404
-            return "Track not found"
-        return trck
+    if trck is None:
+        response.status_code = 404
+        return "Track not found"
+    return trck
 
 
 @app.post("/tracks/", response_model=Track, status_code=status.HTTP_201_CREATED)
-async def create_track(track: Track):
-    track_dict = track.dict()
-    track_dict['id'] = max(data, key=lambda x: x['id']).get('id') + 1
-    data.append(track_dict)
-    return track_dict
-
+async def create_track(trck: TrackModel, session: Session = Depends(get_session)):
+    if isinstance(trck.last_play, str):
+        trck.last_play = datetime.fromisoformat(trck.last_play)
+    session.add(trck)
+    session.commit()
+    session.refresh(trck)
+    return trck
 
 @app.put("/tracks/{track_id}", response_model=Union[Track, str])
-async def modify_track(track_id: int, updated_track: Track, response: Response):
+async def modify_track(track_id: int, updated_track: Track, response: Response, session: Session = Depends(get_session)):
     # find track with given ID or none if none exists
-    track = None
-    for t in data:
-        if t['id'] == track_id:
-            track = t
-            break
+    trck = session.get(TrackModel, track_id)
 
-    if track is None:
+    if trck is None:
         response.status_code = 404
         return "Track not found"
 
-    for key, val in updated_track.dict().items():
-        if key != 'id':
-            track[key] = val
-    return track
+    track_dict = updated_track.model_dump(exclude_unset=True)
+    for key, val in track_dict.items():
+        setattr(trck, key, val)
+    if isinstance(trck.last_play, str):
+        trck.last_play = datetime.fromisoformat(trck.last_play)
+    session.add(trck)
+    session.commit()
+    session.refresh(trck)
+    return trck
 
 
 @app.delete("/tracks/{track_id}")
-async def delete_track(track_id: int, response: Response):
+async def delete_track(track_id: int, response: Response, session: Session = Depends(get_session)):
     # find track with given ID or none if none exists
-    track_index = None
-    for idx, t in enumerate(data):
-        if t['id'] == track_id:
-            track_index = idx
-            break
+    trck = session.get(TrackModel, track_id)
 
-    if track_index is None:
+    if trck is None:
         response.status_code = 404
         return "Track not found"
 
-    del data[track_index]
+    session.delete(trck)
+    session.commit()
     return Response(status_code=200)
 
